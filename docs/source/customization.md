@@ -4,82 +4,54 @@ TRL is designed with modularity in mind so that users are able to efficiently cu
 
 ## Use different optimizers and schedulers
 
-By default, the `DPOTrainer` creates a `torch.optim.AdamW` optimizer. You can create and define a different optimizer and pass it to `DPOTrainer` as follows:
+By default, the `DPOTrainer` creates a `torch.optim.AdamW` optimizer. You can create and define a different optimizer and pass it to `DPOTrainer` via the `optimizers` argument:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch import optim
-from trl import DPOConfig, DPOTrainer
 
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
-
+# Create a custom optimizer
 optimizer = optim.SGD(model.parameters(), lr=training_args.learning_rate)
 
+# Pass it to the trainer (optimizer, scheduler)
 trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
+    ...,
     optimizers=(optimizer, None),
 )
-trainer.train()
 ```
 
 ### Add a learning rate scheduler
 
-You can also play with your training by adding learning rate schedulers.
+You can also play with your training by adding learning rate schedulers:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch import optim
-from trl import DPOConfig, DPOTrainer
 
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
-
+# Create optimizer and scheduler
 optimizer = optim.AdamW(model.parameters(), lr=training_args.learning_rate)
 lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
+# Pass both to the trainer
 trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
+    ...,
     optimizers=(optimizer, lr_scheduler),
 )
-trainer.train()
 ```
 
 ## Memory efficient fine-tuning by sharing layers
 
-Another tool you can use for more memory efficient fine-tuning is to share layers between the reference model and the model you want to train.
+Another tool you can use for more memory efficient fine-tuning is to share layers between the reference model and the model you want to train:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import create_reference_model, DPOConfig, DPOTrainer
+from trl import create_reference_model
 
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
+# Create a reference model with shared layers
 ref_model = create_reference_model(model, num_shared_layers=6)
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train[:1%]")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
 
+# Pass it to the trainer
 trainer = DPOTrainer(
-    model=model,
+    ...,
     ref_model=ref_model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
 )
-trainer.train()
 ```
 
 ## Pass 8-bit reference models
@@ -89,98 +61,67 @@ Since `trl` supports all keyword arguments when loading a model from `transforme
 Read more about 8-bit model loading in `transformers` [Load in 8bit or 4bit](https://huggingface.co/docs/transformers/en/peft#load-in-8bit-or-4bit).
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from trl import DPOConfig, DPOTrainer
+from transformers import BitsAndBytesConfig
 
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
+# Create quantization config for 8-bit loading
 quantization_config = BitsAndBytesConfig(load_in_8bit=True)
-ref_model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct", quantization_config= quantization_config)
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
 
-trainer = DPOTrainer(
-    model=model,
-    ref_model=ref_model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
+# Load reference model in 8-bit
+ref_model = AutoModelForCausalLM.from_pretrained(
+    "Qwen/Qwen2.5-0.5B-Instruct",
+    quantization_config=quantization_config
 )
-trainer.train()
-```
 
-## Use the accelerator cache optimizer
-
-When training large models, you should better handle the accelerator cache by iteratively clearing it. To do so, simply pass `optimize_device_cache=True` to [`DPOConfig`]:
-
-```python
-training_args = DPOConfig(..., optimize_device_cache=True)
+# Pass it to the trainer
+trainer = DPOTrainer(
+    ...,
+    ref_model=ref_model,
+)
 ```
 
 ## Add custom callbacks
 
-You can customize the training loop by adding callbacks for logging, monitoring, or early stopping. Callbacks allow you to execute custom code at specific points during training.
+You can customize the training loop by adding callbacks for logging, monitoring, or early stopping:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
-from trl import DPOConfig, DPOTrainer
+from transformers import TrainerCallback
 
-
+# Define a custom callback
 class CustomLoggingCallback(TrainerCallback):
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs is not None:
             print(f"Step {state.global_step}: {logs}")
 
-
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
-
+# Pass it to the trainer
 trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
+    ...,
     callbacks=[CustomLoggingCallback()],
 )
-trainer.train()
 ```
 
 ## Add custom evaluation metrics
 
-You can define custom evaluation metrics to track during training. This is useful for monitoring model performance on specific tasks.
+You can define custom evaluation metrics to track during training:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import DPOConfig, DPOTrainer
-
-
+# Define a custom metric function
 def compute_metrics(eval_preds):
-    # Custom metric computation
     logits, labels = eval_preds
     # Add your metric computation here
     return {"custom_metric": 0.0}
 
-
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-train_dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-eval_dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="test[:10%]")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO", eval_strategy="steps", eval_steps=100)
+# Enable evaluation and pass the metric function
+training_args = DPOConfig(
+    ...,
+    eval_strategy="steps",
+    eval_steps=100
+)
 
 trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
+    ...,
     eval_dataset=eval_dataset,
-    tokenizer=tokenizer,
     compute_metrics=compute_metrics,
 )
-trainer.train()
 ```
 
 ## Use mixed precision training
@@ -190,55 +131,26 @@ Mixed precision training can significantly speed up training and reduce memory u
 You can override the default mixed precision settings if needed:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import DPOConfig, DPOTrainer
-
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-
 # Override to use float16 for older GPUs that don't support bfloat16
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO", fp16=True, bf16=False)
+training_args = DPOConfig(..., fp16=True, bf16=False)
 
 # Or disable mixed precision entirely for full float32 training
-# training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO", fp16=False, bf16=False)
-
-trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
-)
-trainer.train()
+training_args = DPOConfig(..., fp16=False, bf16=False)
 ```
-
-Use `fp16=True, bf16=False` for older GPUs that don't support bfloat16, or `fp16=False, bf16=False` to disable mixed precision completely.
 
 ## Use a custom data collator
 
-You can provide a custom data collator to handle special data preprocessing or padding strategies.
+You can provide a custom data collator to handle special data preprocessing or padding strategies:
 
 ```python
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import DPOConfig, DPOTrainer
 from trl.trainer.dpo_trainer import DataCollatorForPreference
-
-model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct")
-dataset = load_dataset("trl-lib/ultrafeedback_binarized", split="train")
-training_args = DPOConfig(output_dir="Qwen2.5-0.5B-DPO")
 
 # Create a custom data collator with specific padding token
 data_collator = DataCollatorForPreference(pad_token_id=tokenizer.pad_token_id)
 
+# Pass it to the trainer
 trainer = DPOTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=dataset,
-    tokenizer=tokenizer,
+    ...,
     data_collator=data_collator,
 )
-trainer.train()
 ```
